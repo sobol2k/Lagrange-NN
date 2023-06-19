@@ -4,11 +4,12 @@ import numpy as np
 from tensorflow.python.ops.numpy_ops import np_config
 
 class nn_model:
-    def __init__(self,optimiser):
+    def __init__(self,dim,optimiser):
 
+        self.dim = dim
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Input(shape=(4,)),
+                tf.keras.layers.Input(shape=(self.dim,)),
                 tf.keras.layers.Dense(128, activation="softplus"),
                 tf.keras.layers.Dense(128, activation="softplus"),
                 tf.keras.layers.Dense(1,)
@@ -26,35 +27,51 @@ class nn_model:
         y_pred   = L !
         """        
 
-        q , qt = np.split(x_train, 2) # q in N x 2 ; qt in N x 2        
+        n = x_train.shape[0]*x_train.shape[1]
+        alpha = 1E-4
+       
+        x_train  = tf.Variable(np.atleast_2d(x_train))
+        xt_train = tf.constant(np.atleast_2d(xt_train))
 
-        q  = tf.convert_to_tensor(q)
-        qt = tf.convert_to_tensor(qt)
-
+        sl  = int(self.dim/2)
+        idx = int(n/2)
         for epoch in range(epochs):
             
-            with tf.GradientTape() as g1:
-                g1.watch(q)
-                g1.watch(qt)
+            ' Gradient and hessian '
+            with tf.GradientTape(persistent = True) as g1:
+                g1.watch(x_train)
                 with tf.GradientTape(persistent = True) as g2:
-                    g2.watch(q)
-                    g2.watch(qt)
-                    lagrangian = self.model(x_train, training=True)   # lagrangian  in N x 1
-                gradient_q  = g2.gradient(lagrangian, q)         # gradient_q  in N x 2
-                gradient_qt = g2.gradient(lagrangian, qt)        # gradient_qt in N x 2
-            
-            hessian_qt_qt = g1.gradient(gradient_qt, qt) # hessian_qt_qt  in N x 1
-            hessian_q_qt  = g1.gradient(gradient_q, qt)  # hessian_q_qt   in N x 1
+                    g2.watch(x_train)
+                    lagrangian = self.model(x_train, training=True)
+                grad  = g2.gradient(lagrangian, x_train)
                 
-            #reg = alpha * tf.eye()
-            qtt = tf.linalg.inv(hessian_qt_qt) @ (gradient_q - hessian_q_qt@qt)
-           
-            predicted_values = np.concatenate([qt, qtt])
-            loss  = tf.math.reduce_mean(tf.math.square(predicted_values - xt_train))
-
-            # Minimise the combined loss with respect to the neural networks weights
-            gradients = tf.gradients(loss, self.model.trainable_weights)
-            self.optimiser.apply_gradients(zip(gradients, self.model.trainable_weights))
+                hessian_qt_qt = g1.jacobian(grad, x_train)
+                
+                'Sub gradient'
+                gradient_q = tf.reshape(grad[:,:sl],[idx,-1])
+                
+                'Reshape'
+                h_mat = tf.reshape(hessian_qt_qt, [n, n])
+                
+                'Sub matrices'
+                hessian_qt_qt = h_mat[:idx,:idx]
+                hessian_q_qt  = h_mat[idx:,:idx]
+                
+                'Sub vector'
+                qt = tf.reshape(x_train[:,sl:],[int(n/2),-1])
+                
+                'Calculate q_tt'
+                reg = alpha * tf.eye(idx, dtype=tf.float64)
+                qtt = tf.linalg.inv(reg+hessian_qt_qt) @ (gradient_q - hessian_q_qt@qt)
+               
+                'Calculate loss'
+                xt_train         = tf.reshape(xt_train,[n,-1])
+                predicted_values = tf.concat([qt, qtt],axis=0)
+               
+                'Minimise the loss with respect to the neural networks weights'
+                loss  = tf.math.reduce_mean(tf.math.square(predicted_values - xt_train))
+                gradients = g1.gradient(loss, self.model.trainable_weights)
+                self.optimiser.apply_gradients(zip(gradients, self.model.trainable_weights))
 
             
     def predict(self):

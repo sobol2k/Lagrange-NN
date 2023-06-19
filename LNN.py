@@ -33,8 +33,9 @@ def main():
     'Create model'
     optimiser = keras.optimizers.Adam(learning_rate=1e-3)
     epochs = 10000
-    model = nn_model(optimiser)
-    model.train(x_train,xt_train,epochs)
+    dim = 4
+    model = nn_model(dim,optimiser)
+    model.train(x_train[:100,:],xt_train[:100,:],epochs)
     
 if __name__ == "__main__":
     main()
